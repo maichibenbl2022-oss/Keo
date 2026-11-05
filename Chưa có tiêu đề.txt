@@ -1,0 +1,1565 @@
+-- ==========================================================
+-- HOMELESS LIFE HACK v12.0 (PLAYER - PART 1/3)
+-- PHIÊN BẢN FULL DÀI DÒNG - KHÔNG GỘP DÒNG
+-- ==========================================================
+
+-- ==========================================================
+-- 1. KHAI BÁO CÁC DỊCH VỤ CỦA ROBLOX
+-- ==========================================================
+
+-- Khai báo dịch vụ Players để lấy thông tin người chơi
+local Players = game:GetService("Players")
+
+-- Khai báo dịch vụ RunService để tạo vòng lặp
+local RunService = game:GetService("RunService")
+
+-- Khai báo dịch vụ UserInputService để nhận phím bấm
+local UserInputService = game:GetService("UserInputService")
+
+-- Khai báo dịch vụ ReplicatedStorage để lấy các RemoteEvent
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Khai báo dịch vụ TweenService để tạo hiệu ứng animation
+local TweenService = game:GetService("TweenService")
+
+-- Lấy thông tin người chơi hiện tại (LocalPlayer)
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================================
+-- 2. KHAI BÁO BIẾN LƯU TRỮ GIAO DIỆN (GUI PARENT)
+-- ==========================================================
+
+-- Biến lưu trữ thư mục chứa giao diện
+local guiParent
+
+-- Thử lấy CoreGui (thư mục hệ thống của Roblox)
+pcall(function()
+    -- Gán CoreGui vào biến guiParent
+    guiParent = game:GetService("CoreGui")
+end)
+
+-- Nếu không lấy được CoreGui (do executor chặn)
+if not guiParent then
+    -- Thì lấy PlayerGui thay thế
+    guiParent = LocalPlayer:WaitForChild("PlayerGui", 10)
+end
+
+-- ==========================================================
+-- 3. HỆ THỐNG KEY (MỖI KEY DÙNG 1 LẦN, HẾT HẠN 1 TIẾNG)
+-- ==========================================================
+
+-- Tên file lưu key hiện tại
+local KEY_FILE = "HM_key65.dat"
+
+-- Tên file lưu danh sách các key đã sử dụng
+local USED_KEYS_FILE = "HM_used_keys.dat"
+
+-- Biến kiểm tra xem đã mở khóa chưa
+local unlocked = false
+
+-- Hàm đọc nội dung file
+local function readFileRaw(filename)
+    -- Biến lưu kết quả
+    local ok, d = pcall(function()
+        -- Kiểm tra xem hàm readfile có tồn tại không
+        if readfile and isfile and isfile(filename) then
+            -- Nếu có thì đọc file và trả về nội dung
+            return readfile(filename)
+        end
+        -- Nếu không có file thì trả về chuỗi rỗng
+        return ""
+    end)
+    -- Nếu đọc thành công thì trả về dữ liệu, ngược lại trả về chuỗi rỗng
+    return ok and d or ""
+end
+
+-- Hàm ghi nội dung vào file
+local function writeFileRaw(filename, content)
+    -- Bọc trong pcall để tránh lỗi
+    pcall(function()
+        -- Kiểm tra xem hàm writefile có tồn tại không
+        if writefile then
+            -- Ghi nội dung vào file
+            writefile(filename, content)
+        end
+    end)
+end
+
+-- Hàm xóa key hiện tại (khi hết hạn)
+local function wipeKey()
+    -- Ghi chuỗi rỗng vào file key
+    writeFileRaw(KEY_FILE, "")
+end
+
+-- Hàm kiểm tra định dạng key có hợp lệ không
+local function validateKey(k)
+    -- Kiểm tra kiểu dữ liệu phải là string
+    if type(k) ~= "string" then
+        return false
+    end
+    -- Kiểm tra độ dài key phải lớn hơn 4 ký tự
+    if #k < 4 then
+        return false
+    end
+    -- Biến đếm số chữ in hoa
+    local upperCount = 0
+    -- Duyệt qua từng ký tự trong key
+    for i = 1, #k do
+        -- Lấy ký tự tại vị trí i
+        local char = string.sub(k, i, i)
+        -- Nếu là chữ in hoa thì tăng biến đếm
+        if char:match("%u") then
+            upperCount = upperCount + 1
+        end
+    end
+    -- Yêu cầu phải có đúng 3 chữ in hoa
+    if upperCount ~= 3 then
+        return false
+    end
+    -- Yêu cầu key phải kết thúc bằng dấu chấm và khoảng trắng
+    if not string.match(k, "%.%s+$") then
+        return false
+    end
+    -- Nếu thỏa mãn tất cả thì trả về true
+    return true
+end
+
+-- Hàm kiểm tra key hiện tại có còn hạn không
+local function keyValidNow()
+    -- Đọc nội dung file key
+    local raw = readFileRaw(KEY_FILE)
+    -- Nếu file rỗng thì trả về false
+    if raw == "" then
+        return false
+    end
+    -- Tìm dấu phân cách giữa key và thời gian
+    local a, b = string.find(raw, "|", 1, true)
+    -- Nếu không tìm thấy thì trả về false
+    if not a then
+        return false
+    end
+    -- Tách lấy phần key
+    local k  = string.sub(raw, 1, a - 1)
+    -- Tách lấy phần thời gian (timestamp)
+    local ts = tonumber(string.sub(raw, b + 1))
+    -- Kiểm tra key và thời gian có hợp lệ không
+    if not k or not ts or not validateKey(k) then
+        return false
+    end
+    -- Kiểm tra thời gian hiện tại so với thời gian lưu (3600 giây = 1 tiếng)
+    if (os.time() - ts) >= 3600 then
+        return false
+    end
+    -- Nếu còn hạn thì trả về true
+    return true
+end
+
+-- Hàm kiểm tra key này đã từng được sử dụng chưa
+local function isKeyUsed(k)
+    -- Đọc danh sách các key đã dùng
+    local used = readFileRaw(USED_KEYS_FILE)
+    -- Duyệt qua từng dòng trong file
+    for line in string.gmatch(used, "[^\n]+") do
+        -- Nếu tìm thấy key trùng khớp
+        if line == k then
+            return true
+        end
+    end
+    -- Nếu không tìm thấy thì trả về false
+    return false
+end
+
+-- Hàm đánh dấu key đã được sử dụng (burn key)
+local function markKeyUsed(k)
+    -- Nếu key đã được dùng rồi thì không làm gì cả
+    if isKeyUsed(k) then
+        return
+    end
+    -- Đọc danh sách key đã dùng
+    local used = readFileRaw(USED_KEYS_FILE)
+    -- Ghi thêm key mới vào danh sách (xuống dòng)
+    writeFileRaw(USED_KEYS_FILE, used .. k .. "\n")
+end
+
+-- ==========================================================
+-- 4. HỆ THỐNG ADMIN SYNC (MÃ HÓA KÝ TỰ ẨN)
+-- ==========================================================
+
+-- Ký tự ẩn ZWSP (Zero Width Space)
+local ZW0 = "\u{200B}"
+
+-- Ký tự ẩn ZWNJ (Zero Width Non-Joiner)
+local ZW1 = "\u{200C}"
+
+-- Chữ ký nhận diện tin nhắn của script
+local OBS_SIG = "FXADMIN"
+
+-- Hàm mã hóa lệnh thành chuỗi ký tự ẩn
+local function encodeObs(cmd, data)
+    -- Tạo chuỗi gốc cần mã hóa
+    local s = OBS_SIG .. "|" .. cmd .. "|" .. tostring(data)
+    -- Bảng chứa các ký tự ẩn
+    local out = {}
+    -- Duyệt qua từng ký tự trong chuỗi gốc
+    for i = 1, #s do
+        -- Lấy mã byte của ký tự
+        local b = string.byte(s, i)
+        -- Duyệt từ bit cao đến bit thấp
+        for j = 7, 0, -1 do
+            -- Tính giá trị bit hiện tại
+            local bit = math.floor(b / 2^j) % 2
+            -- Nếu bit = 1 thì thêm ZW1, ngược lại thêm ZW0
+            if bit == 1 then
+                out[#out+1] = ZW1
+            else
+                out[#out+1] = ZW0
+            end
+        end
+    end
+    -- Nối tất cả ký tự ẩn lại thành 1 chuỗi
+    return table.concat(out)
+end
+
+-- Hàm giải mã chuỗi ký tự ẩn
+local function decodeObs(text)
+    -- Nếu chuỗi quá ngắn thì bỏ qua
+    if #text < 64 then
+        return nil
+    end
+    -- Bảng chứa các bit
+    local bits = {}
+    -- Duyệt qua từng ký tự trong chuỗi
+    for i = 1, #text do
+        -- Lấy ký tự hiện tại
+        local c = string.sub(text, i, i)
+        -- Nếu là ZW0 thì thêm bit 0
+        if c == ZW0 then
+            bits[#bits+1] = "0"
+        -- Nếu là ZW1 thì thêm bit 1
+        elseif c == ZW1 then
+            bits[#bits+1] = "1"
+        end
+    end
+    -- Nếu không đủ bit thì bỏ qua
+    if #bits < 8 then
+        return nil
+    end
+    -- Bảng chứa các byte giải mã
+    local out = {}
+    -- Duyệt theo từng nhóm 8 bit
+    for i = 1, #bits - 7, 8 do
+        -- Biến lưu giá trị byte
+        local b = 0
+        -- Tính giá trị byte từ 8 bit
+        for j = 0, 7 do
+            b = b * 2 + tonumber(bits[i+j])
+        end
+        -- Chuyển byte thành ký tự và thêm vào bảng
+        out[#out+1] = string.char(b)
+    end
+    -- Nối tất cả ký tự lại thành chuỗi
+    local s = table.concat(out)
+    -- Kiểm tra chữ ký nhận diện
+    if string.sub(s, 1, #OBS_SIG) ~= OBS_SIG then
+        return nil
+    end
+    -- Tách các phần bằng dấu |
+    local parts = string.split(s, "|")
+    -- Nếu không đủ 3 phần thì bỏ qua
+    if #parts < 3 then
+        return nil
+    end
+    -- Trả về lệnh và dữ liệu
+    return parts[2], parts[3]
+end
+
+-- Hàm gửi tin nhắn chat (dùng để gửi ký tự ẩn hoặc thông báo)
+local function ChatSpam(msg)
+    -- Bọc trong pcall để tránh lỗi
+    pcall(function()
+        -- Lấy dịch vụ TextChatService
+        local tcs = game:GetService("TextChatService")
+        -- Nếu dùng TextChatService mới
+        if tcs and tcs.ChatVersion == Enum.ChatVersion.TextChatService then
+            -- Lấy kênh chat
+            local ch = tcs:FindFirstChild("TextChannels")
+            -- Nếu tìm thấy kênh RBXGeneral
+            if ch and ch:FindFirstChild("RBXGeneral") then
+                -- Gửi tin nhắn
+                ch.RBXGeneral:SendAsync(msg)
+            end
+        -- Nếu dùng chat cũ
+        else
+            -- Lấy sự kiện chat cũ
+            local ev = ReplicatedStorage:FindFirstChild("DefaultSystemChatEvents")
+            -- Nếu tìm thấy
+            if ev then
+                -- Lấy sự kiện gửi tin nhắn
+                local say = ev:FindFirstChild("SayMessageRequest")
+                -- Nếu tìm thấy
+                if say then
+                    -- Gửi tin nhắn
+                    say:FireServer(msg, "All")
+                end
+            end
+        end
+    end)
+end
+
+-- (CÒN TIẾP Ở PHẦN 2/3)-- ==========================================================
+-- HOMELESS LIFE HACK v12.0 (PLAYER - PART 2/3)
+-- PHIÊN BẢN FULL DÀI DÒNG - KHÔNG GỘP DÒNG
+-- ==========================================================
+
+-- ==========================================================
+-- 5. MÀN HÌNH CHỜ DUYỆT & GIẢ LẬP CODE CHẠY
+-- ==========================================================
+
+-- Tạo một ScreenGui mới chứa màn hình chờ
+local LoadingGui = Instance.new("ScreenGui")
+
+-- Đặt tên cho ScreenGui
+LoadingGui.Name = "FX_Loading"
+
+-- Không reset khi nhân vật chết
+LoadingGui.ResetOnSpawn = false
+
+-- Bỏ qua phần viền trên của Roblox
+LoadingGui.IgnoreGuiInset = true
+
+-- Đặt độ ưu tiên hiển thị cao nhất
+LoadingGui.DisplayOrder = 999999
+
+-- Gán cha cho ScreenGui
+LoadingGui.Parent = guiParent
+
+-- Tạo Frame nền đen cho màn hình chờ
+local Bg = Instance.new("Frame")
+
+-- Đặt kích thước cho Frame (phủ toàn màn hình)
+Bg.Size = UDim2.new(1, 0, 1, 0)
+
+-- Đặt màu nền là màu đen
+Bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+
+-- Đặt độ trong suốt cho nền (0.1 là hơi trong)
+Bg.BackgroundTransparency = 0.1
+
+-- Gán cha cho Frame
+Bg.Parent = LoadingGui
+
+-- Tạo TextLabel hiển thị trạng thái
+local LoadText = Instance.new("TextLabel")
+
+-- Đặt kích thước cho TextLabel
+LoadText.Size = UDim2.new(1, 0, 0, 60)
+
+-- Đặt vị trí ở giữa màn hình theo chiều dọc
+LoadText.Position = UDim2.new(0, 0, 0.5, -30)
+
+-- Không có nền
+LoadText.BackgroundTransparency = 1
+
+-- Nội dung ban đầu
+LoadText.Text = "ĐANG KIỂM TRA KEY..."
+
+-- Màu chữ xanh lá
+LoadText.TextColor3 = Color3.fromRGB(0, 255, 100)
+
+-- Font chữ kiểu Code (giống màn hình hacker)
+LoadText.Font = Enum.Font.Code
+
+-- Kích thước chữ
+LoadText.TextSize = 20
+
+-- Gán cha cho TextLabel
+LoadText.Parent = Bg
+
+-- Hàm tạo hiệu ứng giả lập code chạy (matrix)
+local function FakeCodeAnimation(callback)
+    -- Chuỗi các ký tự ngẫu nhiên để giả lập code
+    local chars = "abcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;':,.<>/?~`"
+    
+    -- Tạo một luồng (thread) mới để không treo script
+    task.spawn(function()
+        -- Lặp 40 lần để tạo hiệu ứng
+        for i = 1, 40 do
+            -- Biến lưu chuỗi ngẫu nhiên
+            local line = ""
+            
+            -- Tạo một chuỗi dài 60 ký tự
+            for j = 1, 60 do
+                -- Lấy một vị trí ngẫu nhiên trong bảng chars
+                local idx = math.random(1, #chars)
+                
+                -- Cắt ký tự tại vị trí đó
+                local c = string.sub(chars, idx, idx)
+                
+                -- Nối vào chuỗi line
+                line = line .. c
+            end
+            
+            -- Cập nhật nội dung TextLabel
+            LoadText.Text = line
+            
+            -- Đợi 0.04 giây trước khi tiếp tục
+            task.wait(0.04)
+        end
+        
+        -- Sau khi chạy xong hiệu ứng, hiển thị thông báo thành công
+        LoadText.Text = "✅ TEAM S & FX - XÁC THỰC THÀNH CÔNG!"
+        
+        -- Đổi font chữ về GothamBlack cho đẹp
+        LoadText.Font = Enum.Font.GothamBlack
+        
+        -- Đổi màu chữ sang xanh lá sáng
+        LoadText.TextColor3 = Color3.fromRGB(0, 255, 100)
+        
+        -- Gọi hàm callback được truyền vào
+        callback()
+    end)
+end
+
+-- Tạo Frame chứa giao diện nhập Key
+local KeyGui = Instance.new("Frame")
+
+-- Kích thước của Frame nhập key
+KeyGui.Size = UDim2.fromOffset(380, 200)
+
+-- Vị trí ở giữa màn hình
+KeyGui.Position = UDim2.new(0.5, -190, 0.5, -100)
+
+-- Màu nền tối
+KeyGui.BackgroundColor3 = Color3.fromRGB(8, 10, 14)
+
+-- Không có viền
+KeyGui.BorderSizePixel = 0
+
+-- Cho phép tương tác
+KeyGui.Active = true
+
+-- Mặc định ẩn (sẽ hiển thị nếu chưa có key)
+KeyGui.Visible = false
+
+-- Gán cha
+KeyGui.Parent = LoadingGui
+
+-- Bo góc cho Frame
+local KeyGuiCorner = Instance.new("UICorner")
+KeyGuiCorner.CornerRadius = UDim.new(0, 12)
+KeyGuiCorner.Parent = KeyGui
+
+-- Tạo viền cho Frame
+local KStroke = Instance.new("UIStroke")
+KStroke.Color = Color3.fromRGB(0, 255, 100)
+KStroke.Thickness = 1.5
+KStroke.Parent = KeyGui
+
+-- Tạo Tiêu đề cho bảng nhập Key
+local KTitle = Instance.new("TextLabel")
+KTitle.Size = UDim2.new(1, 0, 0, 32)
+KTitle.Position = UDim2.new(0, 0, 0, 8)
+KTitle.BackgroundTransparency = 1
+KTitle.Text = "🔑 NHẬP KEY ĐỂ MỞ KHÓA"
+KTitle.TextColor3 = Color3.fromRGB(0, 255, 100)
+KTitle.TextSize = 14
+KTitle.Font = Enum.Font.GothamBlack
+KTitle.Parent = KeyGui
+
+-- Tạo TextBox để nhập Key
+local KBox = Instance.new("TextBox")
+KBox.Size = UDim2.new(1, -40, 0, 32)
+KBox.Position = UDim2.new(0, 20, 0, 50)
+KBox.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+KBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+KBox.TextSize = 11
+KBox.Font = Enum.Font.GothamBold
+KBox.PlaceholderText = "Nhập key (VD: AbcDE.  )"
+KBox.PlaceholderColor3 = Color3.fromRGB(100, 105, 115)
+KBox.Text = ""
+KBox.ClearTextOnFocus = false
+KBox.Parent = KeyGui
+
+-- Bo góc cho TextBox
+local KBoxCorner = Instance.new("UICorner")
+KBoxCorner.CornerRadius = UDim.new(0, 6)
+KBoxCorner.Parent = KBox
+
+-- Tạo TextLabel hiển thị trạng thái nhập key (đúng/sai)
+local KStatus = Instance.new("TextLabel")
+KStatus.Size = UDim2.new(1, -40, 0, 16)
+KStatus.Position = UDim2.new(0, 20, 0, 88)
+KStatus.BackgroundTransparency = 1
+KStatus.Text = ""
+KStatus.TextColor3 = Color3.fromRGB(255, 100, 100)
+KStatus.TextSize = 9
+KStatus.Font = Enum.Font.GothamBold
+KStatus.TextXAlignment = Enum.TextXAlignment.Left
+KStatus.Parent = KeyGui
+
+-- Tạo Nút xác nhận
+local KBtn = Instance.new("TextButton")
+KBtn.Size = UDim2.new(1, -40, 0, 32)
+KBtn.Position = UDim2.new(0, 20, 0, 114)
+KBtn.BackgroundColor3 = Color3.fromRGB(0, 90, 35)
+KBtn.Text = "XÁC NHẬN"
+KBtn.TextColor3 = Color3.fromRGB(0, 255, 100)
+KBtn.TextSize = 11
+KBtn.Font = Enum.Font.GothamBlack
+KBtn.BorderSizePixel = 0
+KBtn.Parent = KeyGui
+
+-- Bo góc cho Nút
+local KBtnCorner = Instance.new("UICorner")
+KBtnCorner.CornerRadius = UDim.new(0, 6)
+KBtnCorner.Parent = KBtn
+
+-- ==========================================================
+-- 6. HÀM CHỜ ADMIN DUYỆT (QUAN TRỌNG)
+-- ==========================================================
+
+-- Hàm thực hiện việc chờ Admin phản hồi
+local function WaitForAdmin()
+    -- Cập nhật dòng chữ trên màn hình
+    LoadText.Text = "ĐANG CHỜ ADMIN DUYỆT..."
+    
+    -- Màu chữ xanh lá
+    LoadText.TextColor3 = Color3.fromRGB(0, 255, 100)
+    
+    -- Font chữ Code
+    LoadText.Font = Enum.Font.Code
+
+    -- Biến kiểm tra đã được duyệt chưa
+    local approved = false
+    
+    -- Biến kiểm tra bị từ chối chưa
+    local denied = false
+
+    -- Tạo luồng gửi yêu cầu liên tục
+    task.spawn(function()
+        -- Lặp cho đến khi có kết quả (duyệt hoặc từ chối)
+        while not approved and not denied do
+            -- Gửi yêu cầu đến Admin qua chat ẩn
+            ChatSpam(encodeObs("req", LocalPlayer.Name .. "|" .. LocalPlayer.DisplayName))
+            
+            -- Đợi 3 giây trước khi gửi lại
+            task.wait(3)
+        end
+    end)
+
+    -- Lấy dịch vụ TextChatService để bắt tín hiệu
+    local tcs = game:GetService("TextChatService")
+    
+    -- Nếu dịch vụ tồn tại
+    if tcs then
+        -- Lưu lại hàm xử lý cũ (nếu có)
+        local old = tcs.OnIncomingMessage
+        
+        -- Ghi đè hàm xử lý tin nhắn đến
+        tcs.OnIncomingMessage = function(message)
+            -- Lấy nội dung tin nhắn
+            local text = message.Text or ""
+            
+            -- Giải mã tin nhắn xem có phải của Admin không
+            local cmd, data = decodeObs(text)
+            
+            -- Nếu là tin nhắn của Admin
+            if cmd and data then
+                -- Nếu lệnh là "acc" và tên trùng khớp
+                if cmd == "acc" and data == LocalPlayer.Name then
+                    -- Đánh dấu đã được duyệt
+                    approved = true
+                
+                -- Nếu lệnh là "deny" và tên trùng khớp
+                elseif cmd == "deny" and data == LocalPlayer.Name then
+                    -- Đánh dấu bị từ chối
+                    denied = true
+                    
+                    -- Kick người chơi ra khỏi game
+                    LocalPlayer:Kick("❌ CHƯA ĐƯỢC DUYỆT! Liên hệ Admin (Team S & FX).")
+                
+                -- Nếu lệnh là "kick" và tên trùng khớp
+                elseif cmd == "kick" and data == LocalPlayer.Name then
+                    -- Kick người chơi ra khỏi game
+                    LocalPlayer:Kick("🚫 Bạn đã bị Admin Kick!")
+                
+                -- Nếu lệnh là "kill" và tên trùng khớp
+                elseif cmd == "kill" and data == LocalPlayer.Name then
+                    -- Kiểm tra nhân vật có tồn tại không
+                    if LocalPlayer.Character then
+                        -- Lấy Humanoid
+                        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                        -- Nếu có Humanoid thì set máu về 0
+                        if hum then
+                            hum.Health = 0
+                        end
+                    end
+                
+                -- Nếu lệnh là "freeze" và tên trùng khớp
+                elseif cmd == "freeze" and data == LocalPlayer.Name then
+                    -- Kiểm tra nhân vật có tồn tại không
+                    if LocalPlayer.Character then
+                        -- Lấy HumanoidRootPart
+                        local root = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        -- Nếu có thì neo cứng lại (không di chuyển được)
+                        if root then
+                            root.Anchored = true
+                        end
+                    end
+                end
+            end
+            
+            -- Trả về kết quả cho hàm cũ
+            return old and old(message) or nil
+        end
+    end
+
+    -- Tạo luồng kiểm tra thời gian chờ (tối đa 120 giây)
+    task.spawn(function()
+        -- Đợi 120 giây
+        task.wait(120)
+        
+        -- Nếu sau 120s vẫn chưa được duyệt hoặc chưa bị từ chối
+        if not approved and not denied then
+            -- Kick người chơi
+            LocalPlayer:Kick("❌ QUÁ 2 PHÚT CHỜ DUYỆT! Vui lòng thử lại.")
+        end
+    end)
+
+    -- Vòng lặp chờ đến khi được duyệt
+    repeat
+        task.wait(0.1)
+    until approved
+
+    -- Tạo luồng gửi tín hiệu "còn sống" (alive) mỗi 5 giây
+    task.spawn(function()
+        while true do
+            -- Đợi 5 giây
+            task.wait(5)
+            -- Gửi tín hiệu để Admin biết mình vẫn đang online
+            ChatSpam(encodeObs("alive", LocalPlayer.Name))
+        end
+    end)
+
+    -- Gọi hàm giả lập code chạy
+    FakeCodeAnimation(function()
+        -- Đợi 1.5 giây
+        task.wait(1.5)
+        
+        -- Tạo hiệu ứng mờ dần cho nền đen
+        local tweenBg = TweenService:Create(Bg, TweenInfo.new(1), { BackgroundTransparency = 1 })
+        tweenBg:Play()
+        
+        -- Tạo hiệu ứng mờ dần cho dòng chữ
+        local tweenText = TweenService:Create(LoadText, TweenInfo.new(1), { TextTransparency = 1 })
+        tweenText:Play()
+        
+        -- Đợi 1 giây
+        task.wait(1)
+        
+        -- Xóa màn hình chờ
+        LoadingGui:Destroy()
+        
+        -- Đánh dấu đã mở khóa
+        unlocked = true
+    end)
+end
+
+-- ==========================================================
+-- 7. KHỞI CHẠY HỆ THỐNG KEY
+-- ==========================================================
+
+-- Nếu đã có key hợp lệ từ trước
+if keyValidNow() then
+    -- Ẩn bảng nhập key
+    KeyGui.Visible = false
+    
+    -- Chuyển thẳng sang bước chờ Admin duyệt
+    WaitForAdmin()
+-- Nếu chưa có key
+else
+    -- Hiển thị bảng nhập key
+    KeyGui.Visible = true
+    
+    -- Gắn sự kiện khi bấm nút Xác Nhận
+    KBtn.MouseButton1Click:Connect(function()
+        -- Lấy nội dung người dùng nhập
+        local inputKey = KBox.Text
+        
+        -- Kiểm tra định dạng key
+        if not validateKey(inputKey) then
+            -- Báo lỗi
+            KStatus.Text = "❌ Sai định dạng! (3 chữ in hoa + dấu chấm cách)"
+            return
+        end
+        
+        -- Kiểm tra key đã dùng chưa
+        if isKeyUsed(inputKey) then
+            -- Báo lỗi
+            KStatus.Text = "❌ Key này đã được sử dụng rồi!"
+            return
+        end
+        
+        -- Đánh dấu key đã dùng
+        markKeyUsed(inputKey)
+        
+        -- Lưu key và thời gian vào file
+        writeFileRaw(KEY_FILE, inputKey .. "|" .. os.time())
+        
+        -- Hiển thị thông báo thành công
+        KStatus.Text = "✅ Nhập key thành công! Đang chờ duyệt..."
+        KStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
+        
+        -- Đợi 0.6 giây
+        task.wait(0.6)
+        
+        -- Ẩn bảng nhập key
+        KeyGui.Visible = false
+        
+        -- Chuyển sang bước chờ Admin duyệt
+        WaitForAdmin()
+    end)
+end
+
+-- ==========================================================
+-- 8. HOOK COMBAT (XỬ LÝ ĐÒN ĐÁNH & BLOCK)
+-- ==========================================================
+
+-- Lấy các RemoteEvent từ ReplicatedStorage
+local combatRemote = ReplicatedStorage:WaitForChild("CombatRemote", 5)
+local resetEvent = ReplicatedStorage:FindFirstChild("CustomResetEvent")
+local clientSideHitbox = ReplicatedStorage:FindFirstChild("ClientSideHitbox")
+
+-- Biến trạng thái Auto Block
+local isBlockActive = false
+local isBlocking = false
+local cachedState = false
+
+-- Bán kính combat bình phương (20 * 20 = 400)
+local COMBAT_RANGE_SQ = 400
+
+-- Thời gian lưu lần M1 cuối
+local lastM1Time = 0
+
+-- Bộ đệm thời gian
+local BUFFER_TIME = 0.05
+
+-- Biến đếm
+local totalBlocksTriggered = 0
+local activeM2Count = 0
+
+-- Biến lưu hàm FireServer gốc (để hook)
+local originalFireServer
+
+-- Nếu tồn tại combatRemote
+if combatRemote then
+    pcall(function()
+        -- Hook hàm FireServer của Remote này
+        originalFireServer = hookfunction(combatRemote.FireServer, function(self, action, ...)
+            -- Nếu đúng là Remote này
+            if self == combatRemote then
+                -- Nếu lệnh là "Block"
+                if action == "Block" then
+                    -- Nếu đang block rồi hoặc đang bị đánh M2 thì bỏ qua
+                    if cachedState or activeM2Count > 0 then return end
+                    -- Đánh dấu đã block
+                    cachedState = true
+                -- Nếu lệnh là "Unblock"
+                elseif action == "Unblock" then
+                    -- Nếu chưa block thì bỏ qua
+                    if not cachedState then return end
+                    -- Đánh dấu đã thả
+                    cachedState = false
+                end
+            end
+            -- Gọi hàm gốc
+            return originalFireServer(self, action, ...)
+        end)
+    end)
+end
+
+-- Bảng chứa ID animation của đòn M1 (đánh thường)
+local M1_Hash = {
+    ["rbxassetid://107744565860298"]=true,["rbxassetid://78465715879407"]=true,
+    ["rbxassetid://115913899441210"]=true,["rbxassetid://78340978667002"]=true,
+    ["rbxassetid://110455480119234"]=true,["rbxassetid://113855977965817"]=true,
+    ["rbxassetid://100539690185628"]=true,["rbxassetid://75588770417512"]=true,
+    ["rbxassetid://76027121841204"]=true,["rbxassetid://85509536820244"]=true,
+    ["rbxassetid://76023809974201"]=true,["rbxassetid://80084984519164"]=true,
+    ["rbxassetid://112806679653887"]=true,["rbxassetid://116537886768128"]=true,
+    ["rbxassetid://77862408164627"]=true,["rbxassetid://117831676077280"]=true,
+    ["rbxassetid://108522383757676"]=true,["rbxassetid://80789969782354"]=true,
+    ["rbxassetid://137937685928015"]=true,
+}
+
+-- ID animation của đòn M2 (đòn mạnh)
+local M2_TargetID = "rbxassetid://97111539294139"
+
+-- Hàm thả block
+local function rawUnblock()
+    -- Nếu đang block và có hàm gốc
+    if isBlocking and originalFireServer then
+        isBlocking = false
+        originalFireServer(combatRemote, "Unblock")
+    end
+end
+
+-- Hàm block
+local function rawBlock()
+    -- Nếu chưa block, không bị đánh M2, và có hàm gốc
+    if not isBlocking and activeM2Count == 0 and originalFireServer then
+        isBlocking = true
+        totalBlocksTriggered = totalBlocksTriggered + 1
+        originalFireServer(combatRemote, "Block")
+    end
+end
+
+-- Hàm lắng nghe animation M2 của đối thủ
+local function setupM2DynamicListener(p)
+    -- Nếu là bản thân thì bỏ qua
+    if p == LocalPlayer then return end
+    
+    -- Hàm xử lý khi nhân vật đối thủ xuất hiện
+    local function onChar(char)
+        if not char then return end
+        
+        -- Lấy Humanoid và Root
+        local hum = char:WaitForChild("Humanoid", 5)
+        local root = char:WaitForChild("HumanoidRootPart", 5)
+        if not hum or not root then return end
+        
+        -- Lắng nghe sự kiện chơi animation
+        hum.AnimationPlayed:Connect(function(track)
+            -- Nếu Auto Block đang tắt thì bỏ qua
+            if not isBlockActive then return end
+            
+            -- Lấy ID animation
+            local animId = track.Animation and track.Animation.AnimationId
+            
+            -- Nếu đúng là animation M2 (đòn mạnh)
+            if animId == M2_TargetID then
+                -- Lấy nhân vật mình
+                local myChar = LocalPlayer.Character
+                if myChar and myChar:FindFirstChild("HumanoidRootPart") then
+                    -- Tính khoảng cách
+                    local myPos = myChar.HumanoidRootPart.Position
+                    local cPos = root.Position
+                    local dx, dy, dz = cPos.X - myPos.X, cPos.Y - myPos.Y, cPos.Z - myPos.Z
+                    
+                    -- Nếu trong tầm đánh
+                    if (dx * dx + dy * dy + dz * dz) <= COMBAT_RANGE_SQ then
+                        -- Tăng biến đếm M2
+                        activeM2Count = activeM2Count + 1
+                        
+                        -- Thả block ra (để ăn đòn M2)
+                        rawUnblock()
+                        
+                        -- Biến kiểm tra đã dọn dẹp chưa
+                        local cleaned = false
+                        local stoppedConn, endedConn, diedConn
+                        local timeoutTask
+                        
+                        -- Hàm dọn dẹp
+                        local function cleanup()
+                            if cleaned then return end
+                            cleaned = true
+                            activeM2Count = math.max(0, activeM2Count - 1)
+                            if stoppedConn then stoppedConn:Disconnect() end
+                            if endedConn then endedConn:Disconnect() end
+                            if diedConn then diedConn:Disconnect() end
+                            if timeoutTask then task.cancel(timeoutTask) end
+                        end
+                        
+                        -- Gắn sự kiện kết thúc animation
+                        stoppedConn = track.Stopped:Connect(cleanup)
+                        endedConn = track.Ended:Connect(cleanup)
+                        diedConn = hum.Died:Connect(cleanup)
+                        
+                        -- Hẹn giờ tự động dọn dẹp sau khi animation kết thúc
+                        local animDuration = (track.Length > 0 and track.Length) or 1.5
+                        timeoutTask = task.delay(animDuration + 0.1, cleanup)
+                    end
+                end
+            end
+        end)
+    end
+    
+    -- Gắn sự kiện cho nhân vật hiện tại
+    if p.Character then onChar(p.Character) end
+    
+    -- Gắn sự kiện khi đối thủ hồi sinh
+    p.CharacterAdded:Connect(onChar)
+end
+
+-- Áp dụng cho tất cả người chơi hiện có
+for _, p in ipairs(Players:GetPlayers()) do
+    setupM2DynamicListener(p)
+end
+
+-- Áp dụng cho người chơi mới vào
+Players.PlayerAdded:Connect(setupM2DynamicListener)
+
+-- (CÒN TIẾP Ở PHẦN 3/3)-- ==========================================================
+-- HOMELESS LIFE HACK v12.0 (PLAYER - PART 3/3)
+-- PHIÊN BẢN FULL DÀI DÒNG - KHÔNG GỘP DÒNG
+-- ==========================================================
+
+-- ==========================================================
+-- 9. GIAO DIỆN MENU CHÍNH & NÚT HOME CHÓ VUA
+-- ==========================================================
+
+-- Tạo ScreenGui chính cho Menu
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "HM_Menu"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.DisplayOrder = 999999
+ScreenGui.Parent = guiParent
+
+-- Tạo Nút Home (Nút hình chó vua)
+local HomeBtn = Instance.new("TextButton")
+HomeBtn.Size = UDim2.fromOffset(60, 60)
+HomeBtn.Position = UDim2.new(1, -100, 0, 100)
+HomeBtn.BackgroundColor3 = Color3.fromRGB(10, 12, 15)
+HomeBtn.Text = "🐕"
+HomeBtn.TextSize = 30
+HomeBtn.Font = Enum.Font.GothamBold
+HomeBtn.BorderSizePixel = 0
+HomeBtn.AutoButtonColor = false
+HomeBtn.Active = true
+HomeBtn.Parent = ScreenGui
+
+-- Bo tròn nút Home
+local HomeBtnCorner = Instance.new("UICorner")
+HomeBtnCorner.CornerRadius = UDim.new(1, 0)
+HomeBtnCorner.Parent = HomeBtn
+
+-- Tạo ImageLabel chứa ảnh chó vua
+local HomeImg = Instance.new("ImageLabel")
+HomeImg.Size = UDim2.new(1, 0, 1, 0)
+HomeImg.BackgroundTransparency = 1
+HomeImg.Image = "rbxassetid://3293972833" -- ID ảnh chó vua
+HomeImg.ScaleType = Enum.ScaleType.Crop
+HomeImg.Parent = HomeBtn
+
+-- Bo tròn ảnh
+local HomeImgCorner = Instance.new("UICorner")
+HomeImgCorner.CornerRadius = UDim.new(1, 0)
+HomeImgCorner.Parent = HomeImg
+
+-- Tạo viền cho nút Home
+local HomeStroke = Instance.new("UIStroke")
+HomeStroke.Color = Color3.fromRGB(255, 215, 0) -- Viền vàng
+HomeStroke.Thickness = 2.5
+HomeStroke.Parent = HomeBtn
+
+-- Tạo Frame chính cho Menu
+local Main = Instance.new("Frame")
+Main.Size = UDim2.fromOffset(420, 360)
+Main.Position = UDim2.new(0.5, -210, 0.5, -180)
+Main.BackgroundColor3 = Color3.fromRGB(8, 10, 14)
+Main.BorderSizePixel = 0
+Main.Visible = false
+Main.Active = true
+Main.Parent = ScreenGui
+
+-- Bo góc cho Menu
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 12)
+MainCorner.Parent = Main
+
+-- Tạo viền cho Menu
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(0, 255, 100)
+MainStroke.Thickness = 1.5
+MainStroke.Parent = Main
+
+-- Tạo nút X để đóng Menu (phòng trường hợp nút Home lỗi)
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.fromOffset(30, 30)
+CloseBtn.Position = UDim2.new(1, -35, 0, 5)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Parent = Main
+
+-- Bo góc nút X
+local CloseBtnCorner = Instance.new("UICorner")
+CloseBtnCorner.CornerRadius = UDim.new(0, 6)
+CloseBtnCorner.Parent = CloseBtn
+
+-- Tạo thanh Sidebar bên trái
+local Sidebar = Instance.new("Frame")
+Sidebar.Size = UDim2.new(0, 100, 1, 0)
+Sidebar.BackgroundColor3 = Color3.fromRGB(12, 15, 20)
+Sidebar.BorderSizePixel = 0
+Sidebar.Parent = Main
+
+-- Bo góc Sidebar
+local SidebarCorner = Instance.new("UICorner")
+SidebarCorner.CornerRadius = UDim.new(0, 12)
+SidebarCorner.Parent = Sidebar
+
+-- Tạo Logo ở Sidebar
+local Logo = Instance.new("TextLabel")
+Logo.Size = UDim2.new(1, 0, 0, 26)
+Logo.Position = UDim2.new(0, 0, 0, 10)
+Logo.BackgroundColor3 = Color3.fromRGB(0, 80, 40)
+Logo.Text = "🍉 FX MENU"
+Logo.TextColor3 = Color3.fromRGB(0, 255, 100)
+Logo.TextSize = 9
+Logo.Font = Enum.Font.GothamBlack
+Logo.Parent = Sidebar
+
+-- Bo góc Logo
+local LogoCorner = Instance.new("UICorner")
+LogoCorner.CornerRadius = UDim.new(0, 12)
+LogoCorner.Parent = Logo
+
+-- Hàm tạo nút chuyển trang ở Sidebar
+local function MakePageBtn(text, y)
+    -- Tạo nút
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -8, 0, 22)
+    b.Position = UDim2.new(0, 4, 0, y)
+    b.Text = text
+    b.TextColor3 = Color3.fromRGB(140, 140, 140)
+    b.TextSize = 9
+    b.Font = Enum.Font.GothamBold
+    b.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+    b.BorderSizePixel = 0
+    b.AutoButtonColor = false
+    b.TextXAlignment = Enum.TextXAlignment.Left
+    
+    -- Bo góc
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 5)
+    corner.Parent = b
+    
+    -- Padding
+    local p = Instance.new("UIPadding")
+    p.PaddingLeft = UDim.new(0, 5)
+    p.Parent = b
+    
+    return b
+end
+
+-- Tạo các nút trang
+local BtnM1     = MakePageBtn("⚡ M1 SPAM", 45)
+local BtnOR     = MakePageBtn("🌀 OR XOAY", 68)
+local BtnFarm   = MakePageBtn("💰 FARM",    91)
+local BtnAtk    = MakePageBtn("⚔ TAN CONG", 114)
+local BtnMove   = MakePageBtn("🏃 DI CHUYEN", 137)
+local BtnVis    = MakePageBtn("👁 HIEN THI", 160)
+local BtnAura   = MakePageBtn("✨ AURA",     183)
+local BtnExtra  = MakePageBtn("🎁 TIEN ICH", 206)
+local BtnSet    = MakePageBtn("⚙ CAI DAT",  229)
+
+-- Tạo vùng chứa nội dung các trang
+local Content = Instance.new("ScrollingFrame")
+Content.Size = UDim2.new(1, -105, 1, -8)
+Content.Position = UDim2.new(0, 102, 0, 4)
+Content.BackgroundTransparency = 1
+Content.BorderSizePixel = 0
+Content.ScrollBarThickness = 4
+Content.ScrollBarImageColor3 = Color3.fromRGB(0, 255, 100)
+Content.CanvasSize = UDim2.new(0, 0, 0, 1500)
+Content.ScrollingDirection = Enum.ScrollingDirection.Y
+Content.Parent = Main
+
+-- Hàm tạo Frame cho từng trang
+local function MakePage()
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -8, 0, 1500)
+    f.BackgroundTransparency = 1
+    f.Visible = false
+    f.Parent = Content
+    return f
+end
+
+-- Tạo các trang
+local PageM1     = MakePage()
+local PageOR     = MakePage()
+local PageFarm   = MakePage()
+local PageAtk    = MakePage()
+local PageMove   = MakePage()
+local PageVis    = MakePage()
+local PageAura   = MakePage()
+local PageExtra  = MakePage()
+local PageSet    = MakePage()
+
+-- Gom các nút và trang vào bảng để dễ quản lý
+local PageBtns = {BtnM1, BtnOR, BtnFarm, BtnAtk, BtnMove, BtnVis, BtnAura, BtnExtra, BtnSet}
+local Pages = {PageM1, PageOR, PageFarm, PageAtk, PageMove, PageVis, PageAura, PageExtra, PageSet}
+
+-- Hàm chuyển trang
+local function ShowPage(index)
+    for i = 1, 9 do
+        -- Hiển thị trang được chọn
+        Pages[i].Visible = (i == index)
+        
+        -- Đổi màu nút tương ứng
+        if i == index then
+            PageBtns[i].BackgroundColor3 = Color3.fromRGB(0, 90, 35)
+            PageBtns[i].TextColor3 = Color3.fromRGB(0, 255, 100)
+        else
+            PageBtns[i].BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+            PageBtns[i].TextColor3 = Color3.fromRGB(140, 140, 140)
+        end
+    end
+    -- Reset vị trí cuộn
+    Content.CanvasPosition = Vector2.new(0, 0)
+end
+
+-- Gắn sự kiện click cho từng nút trang
+for i, btn in ipairs(PageBtns) do
+    btn.MouseButton1Click:Connect(function()
+        ShowPage(i)
+    end)
+end
+
+-- ==========================================================
+-- 10. HELPERS TẠO UI
+-- ==========================================================
+
+-- Bảng lưu các Remote
+local Remotes = {}
+local ManualRemotes = {}
+local Allies = {}
+
+-- Hàm tạo Tiêu đề
+local function AddTitle(text, parent, y)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(1, -8, 0, 20)
+    l.Position = UDim2.new(0, 4, 0, y)
+    l.BackgroundTransparency = 1
+    l.Text = text
+    l.TextColor3 = Color3.fromRGB(0, 255, 100)
+    l.TextSize = 10
+    l.Font = Enum.Font.GothamBlack
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = parent
+end
+
+-- Hàm tạo Toggle (công tắc)
+local function AddToggle(label, getState, setState, parent, y, notifFunc)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -8, 0, 28)
+    f.Position = UDim2.new(0, 4, 0, y)
+    f.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+    f.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = f
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -50, 1, 0)
+    lbl.Position = UDim2.new(0, 8, 0, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = label
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+    lbl.TextSize = 9
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = f
+
+    local tr = Instance.new("Frame")
+    tr.Size = UDim2.fromOffset(34, 18)
+    tr.Position = UDim2.new(1, -42, 0.5, -9)
+    tr.BackgroundColor3 = Color3.fromRGB(30, 35, 42)
+    tr.Parent = f
+    
+    local trCorner = Instance.new("UICorner")
+    trCorner.CornerRadius = UDim.new(1, 0)
+    trCorner.Parent = tr
+
+    local kn = Instance.new("Frame")
+    kn.Size = UDim2.fromOffset(14, 14)
+    kn.Position = UDim2.new(0, 2, 0.5, -7)
+    kn.BackgroundColor3 = Color3.fromRGB(180, 180, 180)
+    kn.Parent = tr
+    
+    local knCorner = Instance.new("UICorner")
+    knCorner.CornerRadius = UDim.new(1, 0)
+    knCorner.Parent = kn
+
+    local function up(s)
+        if s then
+            tr.BackgroundColor3 = Color3.fromRGB(0, 90, 35)
+            kn.Position = UDim2.new(1, -16, 0.5, -7)
+            kn.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+        else
+            tr.BackgroundColor3 = Color3.fromRGB(30, 35, 42)
+            kn.Position = UDim2.new(0, 2, 0.5, -7)
+            kn.BackgroundColor3 = Color3.fromRGB(180, 180, 180)
+        end
+    end
+
+    f.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            local ns = not getState()
+            setState(ns)
+            up(ns)
+            pcall(function()
+                if ns then
+                    ChatSpam(notifFunc and notifFunc() or ("[kas] ĐÃ BẬT " .. label))
+                else
+                    ChatSpam("[kas] ĐÃ TẮT " .. label)
+                end
+            end)
+        end
+    end)
+    up(getState())
+end
+
+-- Hàm tạo Slider (thanh trượt)
+local function AddSlider(name, value, minV, maxV, cb, parent, y, isF)
+    local f = Instance.new("Frame")
+    f.Size = UDim2.new(1, -8, 0, 36)
+    f.Position = UDim2.new(0, 4, 0, y)
+    f.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+    f.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = f
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -60, 0, 12)
+    lbl.BackgroundTransparency = 1
+    local d0 = isF and string.format("%.2f", value) or tostring(math.floor(value))
+    lbl.Text = name .. ": " .. d0
+    lbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+    lbl.TextSize = 8
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = f
+    
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 8)
+    pad.Parent = lbl
+
+    local tr = Instance.new("Frame")
+    tr.Size = UDim2.new(1, -60, 0, 5)
+    tr.Position = UDim2.new(0, 8, 0, 22)
+    tr.BackgroundColor3 = Color3.fromRGB(30, 35, 42)
+    tr.Parent = f
+    
+    local trCorner = Instance.new("UICorner")
+    trCorner.CornerRadius = UDim.new(1, 0)
+    trCorner.Parent = tr
+
+    local fl = Instance.new("Frame")
+    fl.Size = UDim2.new((value - minV) / (maxV - minV), 0, 1, 0)
+    fl.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+    fl.Parent = tr
+    
+    local flCorner = Instance.new("UICorner")
+    flCorner.CornerRadius = UDim.new(1, 0)
+    flCorner.Parent = fl
+
+    local kn = Instance.new("Frame")
+    kn.Size = UDim2.fromOffset(11, 11)
+    kn.Position = UDim2.new((value - minV) / (maxV - minV), -5, 0.5, -5)
+    kn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    kn.Parent = tr
+    
+    local knCorner = Instance.new("UICorner")
+    knCorner.CornerRadius = UDim.new(1, 0)
+    knCorner.Parent = kn
+
+    local function setV(v)
+        v = math.clamp(v, minV, maxV)
+        if not isF then v = math.floor(v) end
+        value = v
+        local pct = (v - minV) / (maxV - minV)
+        local d = isF and string.format("%.2f", v) or tostring(math.floor(v))
+        lbl.Text = name .. ": " .. d
+        fl.Size = UDim2.new(pct, 0, 1, 0)
+        kn.Position = UDim2.new(pct, -5, 0.5, -5)
+        pcall(cb, v)
+    end
+
+    local minus = Instance.new("TextButton")
+    minus.Size = UDim2.fromOffset(18, 18)
+    minus.Position = UDim2.new(1, -44, 0.5, -9)
+    minus.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    minus.Text = "-"
+    minus.TextColor3 = Color3.fromRGB(255, 255, 255)
+    minus.TextSize = 12
+    minus.Font = Enum.Font.GothamBold
+    minus.Parent = f
+    
+    local minusCorner = Instance.new("UICorner")
+    minusCorner.CornerRadius = UDim.new(0, 4)
+    minusCorner.Parent = minus
+    
+    minus.MouseButton1Click:Connect(function() setV(value - (isF and 0.1 or 1)) end)
+
+    local plus = Instance.new("TextButton")
+    plus.Size = UDim2.fromOffset(18, 18)
+    plus.Position = UDim2.new(1, -22, 0.5, -9)
+    plus.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    plus.Text = "+"
+    plus.TextColor3 = Color3.fromRGB(255, 255, 255)
+    plus.TextSize = 12
+    plus.Font = Enum.Font.GothamBold
+    plus.Parent = f
+    
+    local plusCorner = Instance.new("UICorner")
+    plusCorner.CornerRadius = UDim.new(0, 4)
+    plusCorner.Parent = plus
+    
+    plus.MouseButton1Click:Connect(function() setV(value + (isF and 0.1 or 1)) end)
+
+    local drag = false
+    tr.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            drag = true
+            local rx = input.Position.X - tr.AbsolutePosition.X
+            setV(minV + math.clamp(rx / tr.AbsoluteSize.X, 0, 1) * (maxV - minV))
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if drag and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            local rx = input.Position.X - tr.AbsolutePosition.X
+            setV(minV + math.clamp(rx / tr.AbsoluteSize.X, 0, 1) * (maxV - minV))
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then 
+            drag = false 
+        end
+    end)
+end
+
+-- Hàm tạo Button (nút bấm)
+local function AddButton(label, cb, parent, y, color)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -8, 0, 26)
+    b.Position = UDim2.new(0, 4, 0, y)
+    b.Text = label
+    b.TextColor3 = color or Color3.fromRGB(220, 220, 220)
+    b.TextSize = 9
+    b.Font = Enum.Font.GothamBold
+    b.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+    b.BorderSizePixel = 0
+    b.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = b
+    
+    b.MouseButton1Click:Connect(function() pcall(cb) end)
+end
+
+-- Hàm tạo TextBox (ô nhập liệu)
+local function AddTextBox(ph, parent, y)
+    local t = Instance.new("TextBox")
+    t.Size = UDim2.new(1, -8, 0, 24)
+    t.Position = UDim2.new(0, 4, 0, y)
+    t.BackgroundColor3 = Color3.fromRGB(15, 18, 25)
+    t.TextColor3 = Color3.fromRGB(255, 255, 255)
+    t.TextSize = 9
+    t.Font = Enum.Font.Gotham
+    t.Text = ""
+    t.PlaceholderText = ph
+    t.PlaceholderColor3 = Color3.fromRGB(100, 105, 115)
+    t.Parent = parent
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = t
+    
+    return t
+end
+
+-- ==========================================================
+-- 11. KHAI BÁO BIẾN TRẠNG THÁI (STATE) & CẤU HÌNH (CONFIG)
+-- ==========================================================
+
+local State = {
+    M1Spam=false, ORLock=false, Farm=false, Aim=false, Spam=false,
+    Dash=false, Fly=false, TP=false, ESP=false, Hitbox=false,
+    Aura=false, AntiStun=false, GodMode=true, NoHunger=true,
+    LAGMode=false, NoClip=false, Nametag=false, Spin=false, AutoBlock=false,
+    Troll=false, Orbit360=false, FastReset=false, MonsterControl=false,
+    AutoFarmCash=false, AutoExecute=false
+}
+
+local Config = {
+    M1Rate=0.15, SpamRate=0.05, AttackRange=50,
+    ORRange=9999, ORNear=15, ORMode="FOLLOW", ORRotSpeed=150, orbitAngle=0,
+    ORHeight=2.5, ORDistance=3, ORWalkSpeed=18,
+    DashAttackDuration=1, DashWaitDuration=1, DashHitRate=0.03,
+    DashOrbitRadius=4, DashOrbitSpeed=300, DashGroundOffset=1,
+    TPLoopTime=10, AutoReset = false, ResetTime = 10,
+    AntiDetect=true, FlySpeed=50, TPDistance=3, HitboxSize=15,
+    Target=nil, TargetName="", FarmRadius=30, FarmClicks=5, FarmDelay=3,
+    FarmPos=nil, FarmWaiting=false, FarmRunning=false, HealThreshold=30,
+    SpinSpeed = 20, ResetRate = 0.5, OrbitRadius = 15, OrbitSpeed = 5, OrbitHeight = 0, OrbitMax = 10,
+    AutoFarmCashRadius = 50, AutoExecuteHP = 20, AutoExecuteRange = 15
+}
+
+-- Các biến lưu trữ tạm thời
+local ORLastTarget = nil
+local dashSavedPos = nil
+local dashPhase = "idle"
+local dashTimer = 0
+local dashNextHit = 0
+local dashOrbitAngle = 0
+local lastResetTimer = 0
+local trollPart = nil
+local tpTarget = nil
+local tpStartTime = 0
+local orbitList = {}
+
+-- Hàm reset trạng thái Dash
+local function ResetDash()
+    dashPhase = "idle"
+    dashSavedPos = nil
+    dashTimer = 0
+    dashOrbitAngle = 0
+    lastResetTimer = tick()
+end
+
+-- Hàm kiểm tra người chơi có hợp lệ để tấn công không
+local function Valid(p)
+    if not p or p == LocalPlayer or Allies[p.Name] then 
+        return false 
+    end
+    local c = p.Character
+    if not c then 
+        return false 
+    end
+    local r = c:FindFirstChild("HumanoidRootPart")
+    local h = c:FindFirstChildOfClass("Humanoid")
+    return r and h and h.Health > 0
+end
+
+-- Hàm tìm người chơi gần nhất
+local function FindNearest(range)
+    local mr = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not mr then return nil end
+    local best, bd = nil, range or 100
+    for _, p in ipairs(Players:GetPlayers()) do
+        if Valid(p) then
+            local r = p.Character:FindFirstChild("HumanoidRootPart")
+            if r then
+                local d = (mr.Position - r.Position).Magnitude
+                if d < bd then 
+                    bd = d
+                    best = p 
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- Hàm tìm người chơi theo tên
+local function FindByName(name)
+    if not name or name == "" then return nil end
+    name = string.lower(name)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and string.find(string.lower(p.Name), name, 1, true) then 
+            return p 
+        end
+    end
+    return nil
+end
+
+-- Hàm lấy vũ khí (Tool) đang cầm
+local function GetTool()
+    local c = LocalPlayer.Character
+    if not c then return nil end
+    local t = c:FindFirstChildOfClass("Tool")
+    if t then return t end
+    local bp = LocalPlayer:FindFirstChild("Backpack")
+    if bp then
+        for _, x in ipairs(bp:GetChildren()) do
+            if x:IsA("Tool") then 
+                x.Parent = c
+                return x 
+            end
+        end
+    end
+    return nil
+end
+
+-- Hàm tấn công nhanh (dùng cho chế độ EZY)
+local function EzyFastAttack(target)
+    local c = LocalPlayer.Character
+    if not c then return end
+    local hum = c:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return end
+    
+    -- Dừng các animation đánh cũ
+    for _, track in ipairs(hum:GetPlayingAnimationTracks()) do
+        pcall(function()
+            if track.Priority == Enum.AnimationPriority.Action or track.Priority == Enum.AnimationPriority.Action2 then
+                track:Stop(0.1)
+            end
+        end)
+    end
+
+    -- Kích hoạt vũ khí
+    local tool = c:FindFirstChildOfClass("Tool")
+    if tool then pcall(function() tool:Activate() end) end
+
+    -- Gửi Remote
+    if clientSideHitbox and target then
+        pcall(function() clientSideHitbox:FireServer(target, buffer.fromstring("10069.74")) end)
+    end
+    if combatRemote then
+        pcall(function() combatRemote:FireServer("M1") end)
+        pcall(function() combatRemote:FireServer("Attack") end)
+    end
+    for _, r in ipairs(Remotes) do
+        pcall(function() r:FireServer("M1") end)
+        pcall(function() r:FireServer() end)
+    end
+    for _, r in ipairs(ManualRemotes) do
+        pcall(function() r:FireServer("M1") end)
+        pcall(function() r:FireServer("Attack") end)
+        pcall(function() r:FireServer() end)
+    end
+end
+
+-- Hàm tấn công tất cả (dùng cho M1 Spam, Spam Đánh)
+local function HitAll(target)
+    local c = LocalPlayer.Character
+    if not c then return end
+    
+    -- Kích hoạt tất cả vũ khí
+    for _, t in ipairs(c:GetChildren()) do
+        if t:IsA("Tool") then pcall(function() t.Enabled = true; t:Activate() end) end
+    end
+    
+    -- Gửi Remote tự động
+    for _, r in ipairs(Remotes) do
+        pcall(function() r:FireServer("M1") end)
+        pcall(function() r:FireServer() end)
+    end
+    
+    -- Gửi Remote thủ công
+    for _, r in ipairs(ManualRemotes) do
+        pcall(function() r:FireServer("M1") end)
+        pcall(function() r:FireServer("Attack") end)
+        pcall(function() r:FireServer() end)
+    end
+    
+    -- Gửi Hitbox
+    if clientSideHitbox and target then
+        pcall(function() clientSideHitbox:FireServer(target, buffer.fromstring("10069.74")) end)
+    end
+    
+    if combatRemote then
+        pcall(function() combatRemote:FireServer("M1") end)
+        pcall(function() combatRemote:FireServer("Attack") end)
+    end
+end
+
+-- (CÒN TIẾP Ở PHẦN 4/4)
